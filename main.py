@@ -7,7 +7,8 @@ import model_utils
 import torch
 
 MODEL_PATH = "improved_model.ckpt"
-model = model_utils.SimpleModel.load_from_checkpoint(MODEL_PATH, map_location=torch.device('cpu'))
+model = model_utils.SimpleModel.load_from_checkpoint(
+    MODEL_PATH, map_location=torch.device('cpu'))
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -23,16 +24,12 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     file_location = f"{file.filename}"
     with open(file_location, "wb") as f:
         f.write(file.file.read())
-
     _, mask, input, _ = data_utils.get_data(file_location)
-
     # Pass the data to your model and obtain the MIDI output
     tokens = model.predict(input, mask)
-
     # Return the MIDI file path for the template
-    # midi_file = "MIDI-Unprocessed_02_R2_2008_01-05_ORIG_MID--AUDIO_02_R2_2008_wav--4.midi"
     midi_file = data_utils.generate_midi_file(
-        tokens, path=f"MIDI-Unprocessed_02_R2_2008_01-05_ORIG_MID--AUDIO_02_R2_2008_wav--4.midi")
+        tokens, path=file_location)
     return templates.TemplateResponse("index.html", {"request": request, "midi_file": midi_file})
 
 
