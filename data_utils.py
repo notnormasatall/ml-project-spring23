@@ -1,8 +1,6 @@
 # General
 import librosa
 from torch.utils.data import Dataset
-import torch.optim as optim
-import torch.nn as nn
 from pathlib import Path
 from typing import List, Dict
 from tqdm import tqdm
@@ -35,7 +33,7 @@ def get_spectogram(audio, sr=SAMPLE_RATE, hl=HOP_WIDTH, mn=MEL_BINS, n_fft=N_FFT
                                           hop_length=hl, n_mels=mn).T
 
 
-def pad_spectrogram(spectrogram, seq_size=511, log_mel_bins=512):
+def pad_spectrogram(spectrogram, seq_size=511, log_mel_bins = 512):
     '''
     Splits spectogram into batches, each having a mask.
     '''
@@ -45,19 +43,16 @@ def pad_spectrogram(spectrogram, seq_size=511, log_mel_bins=512):
     for i in range(0, spectrogram.shape[0], seq_size):
 
         if i+seq_size > spectrogram.shape[0]:
-            result = np.append(spectrogram[i:i+seq_size],
-                               np.array([0 for _ in range(log_mel_bins)]).reshape(1, log_mel_bins), axis=0)
-            batches.append(np.append(result,
-                                     np.array([-100 for _ in range((i+seq_size - spectrogram.shape[0])*(log_mel_bins))]).reshape(i+seq_size - spectrogram.shape[0], log_mel_bins), axis=0))
-            attention_mask.append([1 for _ in range(spectrogram.shape[0] - i + 1)] + [
-                                  0 for _ in range(i+seq_size - spectrogram.shape[0])])
+            result = np.append(spectrogram[i:i+seq_size], 
+                               np.array([1 for _ in range(log_mel_bins)]).reshape(1, log_mel_bins), axis=0)      
+            batches.append(np.append(result, 
+                                     np.array([0 for _ in range((i+seq_size - spectrogram.shape[0])*(log_mel_bins))]).reshape(i+seq_size - spectrogram.shape[0], log_mel_bins), axis=0))
+            attention_mask.append([1 for _ in range(spectrogram.shape[0] - i + 1)] + [0 for _ in range(i+seq_size - spectrogram.shape[0])])
             continue
-        batches.append(np.append(spectrogram[i:i+seq_size], np.array(
-            [0 for _ in range(log_mel_bins)]).reshape(1, log_mel_bins), axis=0))
+        batches.append(np.append(spectrogram[i:i+seq_size], np.array([1 for _ in range(log_mel_bins)]).reshape(1, log_mel_bins), axis=0))
         attention_mask.append([1 for _ in range(seq_size+1)])
-
-    batches, attention_mask = np.array(batches).reshape(len(
-        batches), seq_size + 1, log_mel_bins), np.array(attention_mask).reshape(len(attention_mask), seq_size + 1)
+    
+    batches, attention_mask = np.array(batches).reshape(len(batches), seq_size + 1, log_mel_bins), np.array(attention_mask).reshape(len(attention_mask), seq_size + 1)
     batches = batches.astype(np.float32)
     attention_mask = attention_mask.astype(np.float32)
     return batches, attention_mask
@@ -85,11 +80,6 @@ class MIDIDataset(Dataset):
             batches_mask = []
             spect = get_spectogram(load_data(file_path))
             input_batches, input_mask = pad_spectrogram(spect)
-
-            mask = np.ones(input_batches.shape[0], dtype=bool)
-
-            input_batches = input_batches[mask]
-            input_mask = input_mask[mask]
 
             spectrograms.append(np.array(input_batches))
             input_masks.append(np.array(input_mask))
@@ -154,10 +144,13 @@ def get_data(path):
 def generate_midi_file(predicted_tokens, path="", max_seq_len=4088):
     tokens = []
     for sequence in predicted_tokens:
-        sequence = sequence[0]
+        start_flag = False
         for token in sequence:
-            if not token:
-                break
+            if token == 1:
+                if not start_flag:
+                    start_flag = True
+                else:
+                    break
             else:
                 tokens.append(token.item())
 
@@ -175,27 +168,28 @@ def generate_midi_file(predicted_tokens, path="", max_seq_len=4088):
     queue = {}
 
     for token in tokens:
-        if "Velocity" in detokenizer_vocab[token]:
-            curr_vel = int(detokenizer_vocab[token].split("_")[1])
-        elif "NoteOn" in detokenizer_vocab[token]:
-            queue[int(detokenizer_vocab[token].split("_")[1])] = (
-                abs_time, curr_vel)
-        elif "NoteOff" in detokenizer_vocab[token]:
-            try:
-                start, vel = queue[int(detokenizer_vocab[token].split("_")[1])]
-                pitch = int(detokenizer_vocab[token].split("_")[1])
-                end = abs_time
-                piano.notes.append(pretty_midi.Note(
-                    velocity=vel, pitch=pitch, start=start, end=end))
-            except KeyError:
-                pass
-        else:  # timeshift
-            curr_time = int(detokenizer_vocab[token].split("_")[1])
-            if curr_time >= prev_time:
-                abs_time += (curr_time - prev_time)/1000
-            else:
-                abs_time += (max_seq_len - prev_time + curr_time)/1000
-            prev_time = curr_time
+        if token:
+            if "Velocity" in detokenizer_vocab[token]:
+                curr_vel = int(detokenizer_vocab[token].split("_")[1])
+            elif "NoteOn" in detokenizer_vocab[token]:
+                queue[int(detokenizer_vocab[token].split("_")[1])] = (
+                    abs_time, curr_vel)
+            elif "NoteOff" in detokenizer_vocab[token]:
+                try:
+                    start, vel = queue[int(detokenizer_vocab[token].split("_")[1])]
+                    pitch = int(detokenizer_vocab[token].split("_")[1])
+                    end = abs_time
+                    piano.notes.append(pretty_midi.Note(
+                        velocity=vel, pitch=pitch, start=start, end=end))
+                except KeyError:
+                    pass
+            else:  # timeshift
+                curr_time = int(detokenizer_vocab[token].split("_")[1])
+                if curr_time >= prev_time:
+                    abs_time += (curr_time - prev_time)/1000
+                else:
+                    abs_time += (max_seq_len - prev_time + curr_time)/1000
+                prev_time = curr_time
 
     mid.instruments.append(piano)
     mid.write(path)
